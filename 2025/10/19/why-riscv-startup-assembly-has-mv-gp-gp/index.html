@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 7.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"mouippon.github.io","root":"/","scheme":"Gemini","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":true},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="前言在撰寫 RISC-V 的 bare-metal 啟動程式碼時，我們通常需要初始化全域指標暫存器（gp）。一開始，我使用了看似正常的寫法： 1__asm__ volatile(&quot;la gp, __global_pointer$ \n&quot;);  但反組譯後卻發現產生了一條奇怪的指令：mv gp, gp。這條指令將 gp 搬移到自己，看起來什麼都沒做。這是怎麼回事？">
+<meta property="og:type" content="article">
+<meta property="og:title" content="為何RISC-V的開機assembly出現mv gp,gp?">
+<meta property="og:url" content="https://mouippon.github.io/2025/10/19/why-riscv-startup-assembly-has-mv-gp-gp/index.html">
+<meta property="og:site_name" content="mouippon">
+<meta property="og:description" content="前言在撰寫 RISC-V 的 bare-metal 啟動程式碼時，我們通常需要初始化全域指標暫存器（gp）。一開始，我使用了看似正常的寫法： 1__asm__ volatile(&quot;la gp, __global_pointer$ \n&quot;);  但反組譯後卻發現產生了一條奇怪的指令：mv gp, gp。這條指令將 gp 搬移到自己，看起來什麼都沒做。這是怎麼回事？">
+<meta property="og:locale" content="zh_TW">
+<meta property="article:published_time" content="2025-10-19T12:31:32.000Z">
+<meta property="article:modified_time" content="2025-10-22T18:09:57.414Z">
+<meta property="article:author" content="mouippon">
+<meta property="article:tag" content="RISC-V">
+<meta property="article:tag" content="Assembly">
+<meta property="article:tag" content="Embedded">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="https://mouippon.github.io/2025/10/19/why-riscv-startup-assembly-has-mv-gp-gp/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-TW'
+  };
+</script>
+
+  <title>為何RISC-V的開機assembly出現mv gp,gp? | mouippon</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切換導航欄">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">mouippon</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首頁</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>標籤</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分類</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>歸檔</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-TW">
+    <link itemprop="mainEntityOfPage" href="https://mouippon.github.io/2025/10/19/why-riscv-startup-assembly-has-mv-gp-gp/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/crab_stick.jpg">
+      <meta itemprop="name" content="mouippon">
+      <meta itemprop="description" content="Notes on bare-metal embedded systems, traveling, and cooking">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="mouippon">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          為何RISC-V的開機assembly出現mv gp,gp?
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">發表於</span>
+
+              <time title="創建時間：2025-10-19 20:31:32" itemprop="dateCreated datePublished" datetime="2025-10-19T20:31:32+08:00">2025-10-19</time>
+            </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">更新於</span>
+                <time title="修改時間：2025-10-23 02:09:57" itemprop="dateModified" datetime="2025-10-23T02:09:57+08:00">2025-10-23</time>
+              </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分類於</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/%E5%B5%8C%E5%85%A5%E5%BC%8F%E7%B3%BB%E7%B5%B1/" itemprop="url" rel="index"><span itemprop="name">嵌入式系統</span></a>
+                </span>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>在撰寫 RISC-V 的 bare-metal 啟動程式碼時，我們通常需要初始化全域指標暫存器（<code>gp</code>）。一開始，我使用了看似正常的寫法：</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">__asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;la gp, __global_pointer$ \n&quot;</span>)</span>;</span><br></pre></td></tr></table></figure>
+
+<p>但反組譯後卻發現產生了一條奇怪的指令：<code>mv gp, gp</code>。這條指令將 <code>gp</code> 搬移到自己，看起來什麼都沒做。這是怎麼回事？</p>
+<span id="more"></span>
+
+<h2 id="問題重現"><a href="#問題重現" class="headerlink" title="問題重現"></a>問題重現</h2><h3 id="錯誤的寫法"><a href="#錯誤的寫法" class="headerlink" title="錯誤的寫法"></a>錯誤的寫法</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">boot_init</span><span class="params">(<span class="type">void</span>)</span> &#123;</span><br><span class="line">    __asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;la gp, __global_pointer$ \n&quot;</span>)</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="反組譯結果"><a href="#反組譯結果" class="headerlink" title="反組譯結果"></a>反組譯結果</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">00000000 &lt;boot_init&gt;:</span><br><span class="line">   0:   00000197          auipc   gp,0x0</span><br><span class="line">   4:   00018193          mv      gp,gp      # ← 這是什麼？</span><br></pre></td></tr></table></figure>
+
+<p>等等，<code>mv gp, gp</code> 是什麼操作？這條指令毫無意義啊！</p>
+<h2 id="什麼是-gp-暫存器？"><a href="#什麼是-gp-暫存器？" class="headerlink" title="什麼是 gp 暫存器？"></a>什麼是 gp 暫存器？</h2><p>在深入問題之前，先理解 <code>gp</code> 的作用：</p>
+<h3 id="Global-Pointer-的用途"><a href="#Global-Pointer-的用途" class="headerlink" title="Global Pointer 的用途"></a>Global Pointer 的用途</h3><ul>
+<li><code>gp</code> (x3) 是 RISC-V 的<strong>全域指標暫存器</strong></li>
+<li>指向程式的全域資料區域（通常在 <code>.sdata</code> 附近）</li>
+<li>編譯器用它來快速存取全域變數和靜態變數</li>
+</ul>
+<h3 id="為什麼需要-gp？"><a href="#為什麼需要-gp？" class="headerlink" title="為什麼需要 gp？"></a>為什麼需要 gp？</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 沒有 gp：需要多條指令</span></span><br><span class="line"><span class="type">int</span> global_var = <span class="number">100</span>;</span><br><span class="line"></span><br><span class="line"><span class="type">int</span> <span class="title function_">get_value</span><span class="params">()</span> &#123;</span><br><span class="line">    <span class="comment">// 需要 lui + addi 載入完整位址</span></span><br><span class="line">    <span class="keyword">return</span> global_var;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"># 沒有 gp-relative 定址</span><br><span class="line">lui  a0, %hi(global_var)</span><br><span class="line">lw   a0, %lo(global_var)(a0)   # 兩條指令</span><br><span class="line"></span><br><span class="line"># 使用 gp-relative 定址</span><br><span class="line">lw   a0, offset(gp)             # 只要一條！</span><br></pre></td></tr></table></figure>
+
+<h2 id="Linker-Relaxation-的陷阱"><a href="#Linker-Relaxation-的陷阱" class="headerlink" title="Linker Relaxation 的陷阱"></a>Linker Relaxation 的陷阱</h2><p>問題的根源在於 <strong>linker relaxation（連結器最佳化）</strong>。</p>
+<h3 id="什麼是-Linker-Relaxation？"><a href="#什麼是-Linker-Relaxation？" class="headerlink" title="什麼是 Linker Relaxation？"></a>什麼是 Linker Relaxation？</h3><p>RISC-V 連結器會自動優化某些指令序列：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"># 原始指令</span><br><span class="line">la gp, __global_pointer$</span><br><span class="line"># 展開為：</span><br><span class="line">auipc gp, %pcrel_hi(__global_pointer$)</span><br><span class="line">addi  gp, gp, %pcrel_lo(__global_pointer$)</span><br><span class="line"></span><br><span class="line"># 如果 __global_pointer$ 距離 PC 很近</span><br><span class="line"># 連結器會「優化」成：</span><br><span class="line">addi gp, gp, offset    # 只用一條指令</span><br></pre></td></tr></table></figure>
+
+<h3 id="問題來了"><a href="#問題來了" class="headerlink" title="問題來了"></a>問題來了</h3><p>當 <code>__global_pointer$</code> 恰好在當前位置附近時：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">auipc gp, 0          # offset 的高位是 0</span><br><span class="line">addi  gp, gp, 0      # offset 的低位也是 0</span><br></pre></td></tr></table></figure>
+
+<p>而 <code>addi gp, gp, 0</code> 就是 <code>mv gp, gp</code>！</p>
+<h3 id="為什麼這是錯的？"><a href="#為什麼這是錯的？" class="headerlink" title="為什麼這是錯的？"></a>為什麼這是錯的？</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 你期望的：設定 gp 為全域資料區的位址</span></span><br><span class="line">gp = &amp;__global_pointer$;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 實際發生的：gp 的值沒變</span></span><br><span class="line">gp = gp + <span class="number">0</span>;  <span class="comment">// 等於什麼都沒做！</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="正確的寫法"><a href="#正確的寫法" class="headerlink" title="正確的寫法"></a>正確的寫法</h2><p>要解決這個問題，必須<strong>禁止 linker relaxation</strong>：</p>
+<h3 id="完整的正確版本"><a href="#完整的正確版本" class="headerlink" title="完整的正確版本"></a>完整的正確版本</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line"><span class="type">void</span> <span class="title function_">boot_init</span><span class="params">(<span class="type">void</span>)</span> &#123;</span><br><span class="line">    __asm__ <span class="title function_">volatile</span><span class="params">(</span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option push \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option norelax \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;la gp, __global_pointer$ \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option pop \n&quot;</span></span></span><br><span class="line"><span class="params">    )</span>;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="反組譯結果-1"><a href="#反組譯結果-1" class="headerlink" title="反組譯結果"></a>反組譯結果</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">00000000 &lt;boot_init&gt;:</span><br><span class="line">   0:   00001197          auipc   gp,0x1</span><br><span class="line">   4:   80018193          addi    gp,gp,-2048  # ← 正確載入位址！</span><br></pre></td></tr></table></figure>
+
+<h3 id="逐行解釋"><a href="#逐行解釋" class="headerlink" title="逐行解釋"></a>逐行解釋</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">.option push              # 保存當前編譯選項</span><br><span class="line">.option norelax           # 禁止連結器最佳化</span><br><span class="line">la gp, __global_pointer$  # 強制使用完整的指令序列</span><br><span class="line">.option pop               # 恢復先前的編譯選項</span><br></pre></td></tr></table></figure>
+
+<h2 id="深入理解"><a href="#深入理解" class="headerlink" title="深入理解"></a>深入理解</h2><h3 id="為什麼需要-option-push-pop？"><a href="#為什麼需要-option-push-pop？" class="headerlink" title="為什麼需要 .option push&#x2F;pop？"></a>為什麼需要 .option push&#x2F;pop？</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">.option push       # 儲存目前的設定</span><br><span class="line">.option norelax    # 臨時改變設定</span><br><span class="line"># ... 你的程式碼 ...</span><br><span class="line">.option pop        # 恢復原本的設定（可能是 relax）</span><br></pre></td></tr></table></figure>
+
+<p>這樣可以：</p>
+<ul>
+<li>只在必要時禁用最佳化</li>
+<li>不影響其他程式碼的最佳化</li>
+<li>保持程式碼的整體效率</li>
+</ul>
+<h3 id="Linker-Relaxation-的其他案例"><a href="#Linker-Relaxation-的其他案例" class="headerlink" title="Linker Relaxation 的其他案例"></a>Linker Relaxation 的其他案例</h3><p>除了 <code>gp</code> 之外，relaxation 還會影響：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"># CALL 指令的優化</span><br><span class="line">call far_function</span><br><span class="line"># 可能被優化為：</span><br><span class="line">jal  far_function   # 如果距離夠近</span><br><span class="line"></span><br><span class="line"># LUI + ADDI 的優化</span><br><span class="line">lui  a0, %hi(symbol)</span><br><span class="line">addi a0, a0, %lo(symbol)</span><br><span class="line"># 可能被優化為：</span><br><span class="line">addi a0, zero, immediate  # 如果 symbol 是小數值</span><br></pre></td></tr></table></figure>
+
+<h2 id="完整的-Boot-Code-範例"><a href="#完整的-Boot-Code-範例" class="headerlink" title="完整的 Boot Code 範例"></a>完整的 Boot Code 範例</h2><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// crt0.S 或 startup.c</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">extern</span> <span class="type">char</span> __global_pointer$;</span><br><span class="line"><span class="keyword">extern</span> <span class="type">char</span> __stack_top;</span><br><span class="line"></span><br><span class="line"><span class="type">void</span> _start(<span class="type">void</span>) &#123;</span><br><span class="line">    <span class="comment">// 1. 設定堆疊指標</span></span><br><span class="line">    __asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;la sp, __stack_top&quot;</span>)</span>;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 2. 設定全域指標（正確寫法）</span></span><br><span class="line">    __asm__ <span class="title function_">volatile</span><span class="params">(</span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option push \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option norelax \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;la gp, __global_pointer$ \n&quot;</span></span></span><br><span class="line"><span class="params">        <span class="string">&quot;.option pop \n&quot;</span></span></span><br><span class="line"><span class="params">    )</span>;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 3. 清除 BSS 段</span></span><br><span class="line">    <span class="keyword">extern</span> <span class="type">char</span> __bss_start, __bss_end;</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">char</span> *p = &amp;__bss_start; p &lt; &amp;__bss_end; p++) &#123;</span><br><span class="line">        *p = <span class="number">0</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 4. 初始化 data 段（如果需要）</span></span><br><span class="line">    <span class="comment">// copy_data_section();</span></span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 5. 跳轉到 main</span></span><br><span class="line">    main();</span><br><span class="line">    </span><br><span class="line">    <span class="comment">// 6. 停止（如果 main 返回）</span></span><br><span class="line">    <span class="keyword">while</span>(<span class="number">1</span>) &#123;</span><br><span class="line">        __asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;wfi&quot;</span>)</span>;  <span class="comment">// Wait For Interrupt</span></span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="除錯技巧"><a href="#除錯技巧" class="headerlink" title="除錯技巧"></a>除錯技巧</h2><h3 id="1-檢查反組譯"><a href="#1-檢查反組譯" class="headerlink" title="1. 檢查反組譯"></a>1. 檢查反組譯</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">riscv64-unknown-elf-objdump -d your_program.elf | grep -A5 <span class="string">&quot;_start&quot;</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="2-查看連結器的-relaxation"><a href="#2-查看連結器的-relaxation" class="headerlink" title="2. 查看連結器的 relaxation"></a>2. 查看連結器的 relaxation</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">riscv64-unknown-elf-ld --verbose your_program.o</span><br></pre></td></tr></table></figure>
+
+<h3 id="3-驗證-gp-的值"><a href="#3-驗證-gp-的值" class="headerlink" title="3. 驗證 gp 的值"></a>3. 驗證 gp 的值</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 在除錯器中確認</span></span><br><span class="line"><span class="type">void</span> <span class="title function_">check_gp</span><span class="params">(<span class="type">void</span>)</span> &#123;</span><br><span class="line">    <span class="type">unsigned</span> <span class="type">long</span> gp_val;</span><br><span class="line">    __asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;mv %0, gp&quot;</span> : <span class="string">&quot;=r&quot;</span>(gp_val))</span>;</span><br><span class="line">    <span class="built_in">printf</span>(<span class="string">&quot;gp = 0x%lx\n&quot;</span>, gp_val);</span><br><span class="line">    <span class="built_in">printf</span>(<span class="string">&quot;__global_pointer$ = 0x%lx\n&quot;</span>, (<span class="type">unsigned</span> <span class="type">long</span>)&amp;__global_pointer$);</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="常見錯誤"><a href="#常見錯誤" class="headerlink" title="常見錯誤"></a>常見錯誤</h2><h3 id="❌-忘記-norelax"><a href="#❌-忘記-norelax" class="headerlink" title="❌ 忘記 norelax"></a>❌ 忘記 norelax</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">__asm__ <span class="title function_">volatile</span><span class="params">(<span class="string">&quot;la gp, __global_pointer$&quot;</span>)</span>;</span><br><span class="line"><span class="comment">// 可能產生 mv gp, gp</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="❌-順序錯誤"><a href="#❌-順序錯誤" class="headerlink" title="❌ 順序錯誤"></a>❌ 順序錯誤</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">__asm__ <span class="title function_">volatile</span><span class="params">(</span></span><br><span class="line"><span class="params">    <span class="string">&quot;la gp, __global_pointer$ \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="string">&quot;.option norelax \n&quot;</span>  <span class="comment">// 太遲了！</span></span></span><br><span class="line"><span class="params">)</span>;</span><br></pre></td></tr></table></figure>
+
+<h3 id="❌-沒有-pop"><a href="#❌-沒有-pop" class="headerlink" title="❌ 沒有 pop"></a>❌ 沒有 pop</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">__asm__ <span class="title function_">volatile</span><span class="params">(</span></span><br><span class="line"><span class="params">    <span class="string">&quot;.option norelax \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="string">&quot;la gp, __global_pointer$ \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="comment">// 缺少 .option pop，影響後續程式碼</span></span></span><br><span class="line"><span class="params">)</span>;</span><br></pre></td></tr></table></figure>
+
+<h2 id="總結"><a href="#總結" class="headerlink" title="總結"></a>總結</h2><p>從一個看似簡單的 <code>mv gp, gp</code> 指令，我們學到了：</p>
+<ol>
+<li><strong>RISC-V 的 linker relaxation</strong> 會自動優化指令，但有時會出錯</li>
+<li><strong>初始化 gp 必須使用 <code>.option norelax</code></strong> 來確保正確載入位址</li>
+<li><strong><code>.option push/pop</code></strong> 是良好的實踐，避免影響其他程式碼</li>
+<li><strong>反組譯是你的好朋友</strong>，遇到問題時要檢查實際產生的機器碼</li>
+</ol>
+<h3 id="記住這個模式"><a href="#記住這個模式" class="headerlink" title="記住這個模式"></a>記住這個模式</h3><figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">__asm__ <span class="title function_">volatile</span><span class="params">(</span></span><br><span class="line"><span class="params">    <span class="string">&quot;.option push \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="string">&quot;.option norelax \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="string">&quot;la gp, __global_pointer$ \n&quot;</span></span></span><br><span class="line"><span class="params">    <span class="string">&quot;.option pop \n&quot;</span></span></span><br><span class="line"><span class="params">)</span>;</span><br></pre></td></tr></table></figure>
+
+<p>這是 RISC-V bare-metal 開發的標準寫法，幾乎所有的啟動程式碼都應該這樣寫。</p>
+<h2 id="參考資料"><a href="#參考資料" class="headerlink" title="參考資料"></a>參考資料</h2><ul>
+<li><a target="_blank" rel="noopener" href="https://github.com/riscv-non-isa/riscv-elf-psabi-doc">RISC-V ELF psABI Specification</a></li>
+<li><a target="_blank" rel="noopener" href="https://sourceware.org/binutils/docs/as/RISC_002dV_002dDirectives.html">GNU Binutils Documentation - RISC-V</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/riscv-non-isa/riscv-asm-manual">RISC-V Assembly Programmer’s Manual</a></li>
+<li><a target="_blank" rel="noopener" href="https://github.com/bminor/binutils-gdb/blob/master/bfd/elfnn-riscv.c">elfnn-riscv.c - Linker Relaxation 實作</a></li>
+</ul>
+<hr>
+<p><strong>系列文章：</strong></p>
+<ul>
+<li>RISC-V 暫存器約定完整解析</li>
+<li>從零開始的 RISC-V Bare-metal 開發</li>
+<li>理解 RISC-V 的記憶體模型</li>
+</ul>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/RISC-V/" rel="tag"># RISC-V</a>
+              <a href="/tags/Assembly/" rel="tag"># Assembly</a>
+              <a href="/tags/Embedded/" rel="tag"># Embedded</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2025/08/13/hello-world/" rel="prev" title="Hello World">
+      <i class="fa fa-chevron-left"></i> Hello World
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目錄
+        </li>
+        <li class="sidebar-nav-overview">
+          本站概要
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%95%8F%E9%A1%8C%E9%87%8D%E7%8F%BE"><span class="nav-number">2.</span> <span class="nav-text">問題重現</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%8C%AF%E8%AA%A4%E7%9A%84%E5%AF%AB%E6%B3%95"><span class="nav-number">2.1.</span> <span class="nav-text">錯誤的寫法</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%8F%8D%E7%B5%84%E8%AD%AF%E7%B5%90%E6%9E%9C"><span class="nav-number">2.2.</span> <span class="nav-text">反組譯結果</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BB%80%E9%BA%BC%E6%98%AF-gp-%E6%9A%AB%E5%AD%98%E5%99%A8%EF%BC%9F"><span class="nav-number">3.</span> <span class="nav-text">什麼是 gp 暫存器？</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#Global-Pointer-%E7%9A%84%E7%94%A8%E9%80%94"><span class="nav-number">3.1.</span> <span class="nav-text">Global Pointer 的用途</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%82%BA%E4%BB%80%E9%BA%BC%E9%9C%80%E8%A6%81-gp%EF%BC%9F"><span class="nav-number">3.2.</span> <span class="nav-text">為什麼需要 gp？</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Linker-Relaxation-%E7%9A%84%E9%99%B7%E9%98%B1"><span class="nav-number">4.</span> <span class="nav-text">Linker Relaxation 的陷阱</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%BB%80%E9%BA%BC%E6%98%AF-Linker-Relaxation%EF%BC%9F"><span class="nav-number">4.1.</span> <span class="nav-text">什麼是 Linker Relaxation？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%95%8F%E9%A1%8C%E4%BE%86%E4%BA%86"><span class="nav-number">4.2.</span> <span class="nav-text">問題來了</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%82%BA%E4%BB%80%E9%BA%BC%E9%80%99%E6%98%AF%E9%8C%AF%E7%9A%84%EF%BC%9F"><span class="nav-number">4.3.</span> <span class="nav-text">為什麼這是錯的？</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%AD%A3%E7%A2%BA%E7%9A%84%E5%AF%AB%E6%B3%95"><span class="nav-number">5.</span> <span class="nav-text">正確的寫法</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%AE%8C%E6%95%B4%E7%9A%84%E6%AD%A3%E7%A2%BA%E7%89%88%E6%9C%AC"><span class="nav-number">5.1.</span> <span class="nav-text">完整的正確版本</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%8F%8D%E7%B5%84%E8%AD%AF%E7%B5%90%E6%9E%9C-1"><span class="nav-number">5.2.</span> <span class="nav-text">反組譯結果</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%80%90%E8%A1%8C%E8%A7%A3%E9%87%8B"><span class="nav-number">5.3.</span> <span class="nav-text">逐行解釋</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%B7%B1%E5%85%A5%E7%90%86%E8%A7%A3"><span class="nav-number">6.</span> <span class="nav-text">深入理解</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%82%BA%E4%BB%80%E9%BA%BC%E9%9C%80%E8%A6%81-option-push-pop%EF%BC%9F"><span class="nav-number">6.1.</span> <span class="nav-text">為什麼需要 .option push&#x2F;pop？</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Linker-Relaxation-%E7%9A%84%E5%85%B6%E4%BB%96%E6%A1%88%E4%BE%8B"><span class="nav-number">6.2.</span> <span class="nav-text">Linker Relaxation 的其他案例</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%AE%8C%E6%95%B4%E7%9A%84-Boot-Code-%E7%AF%84%E4%BE%8B"><span class="nav-number">7.</span> <span class="nav-text">完整的 Boot Code 範例</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%99%A4%E9%8C%AF%E6%8A%80%E5%B7%A7"><span class="nav-number">8.</span> <span class="nav-text">除錯技巧</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-%E6%AA%A2%E6%9F%A5%E5%8F%8D%E7%B5%84%E8%AD%AF"><span class="nav-number">8.1.</span> <span class="nav-text">1. 檢查反組譯</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-%E6%9F%A5%E7%9C%8B%E9%80%A3%E7%B5%90%E5%99%A8%E7%9A%84-relaxation"><span class="nav-number">8.2.</span> <span class="nav-text">2. 查看連結器的 relaxation</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-%E9%A9%97%E8%AD%89-gp-%E7%9A%84%E5%80%BC"><span class="nav-number">8.3.</span> <span class="nav-text">3. 驗證 gp 的值</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%B8%B8%E8%A6%8B%E9%8C%AF%E8%AA%A4"><span class="nav-number">9.</span> <span class="nav-text">常見錯誤</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E2%9D%8C-%E5%BF%98%E8%A8%98-norelax"><span class="nav-number">9.1.</span> <span class="nav-text">❌ 忘記 norelax</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E2%9D%8C-%E9%A0%86%E5%BA%8F%E9%8C%AF%E8%AA%A4"><span class="nav-number">9.2.</span> <span class="nav-text">❌ 順序錯誤</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E2%9D%8C-%E6%B2%92%E6%9C%89-pop"><span class="nav-number">9.3.</span> <span class="nav-text">❌ 沒有 pop</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%B8%BD%E7%B5%90"><span class="nav-number">10.</span> <span class="nav-text">總結</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E8%A8%98%E4%BD%8F%E9%80%99%E5%80%8B%E6%A8%A1%E5%BC%8F"><span class="nav-number">10.1.</span> <span class="nav-text">記住這個模式</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8F%83%E8%80%83%E8%B3%87%E6%96%99"><span class="nav-number">11.</span> <span class="nav-text">參考資料</span></a></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+    <img class="site-author-image" itemprop="image" alt="mouippon"
+      src="/images/crab_stick.jpg">
+  <p class="site-author-name" itemprop="name">mouippon</p>
+  <div class="site-description" itemprop="description">Notes on bare-metal embedded systems, traveling, and cooking</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">2</span>
+          <span class="site-state-item-name">文章</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">1</span>
+        <span class="site-state-item-name">分類</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">3</span>
+        <span class="site-state-item-name">標籤</span></a>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2026</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">mouippon -轉載文章時請附上作者(mouippon)及原文連結(Url)。</span>
+</div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
